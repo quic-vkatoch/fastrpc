@@ -76,15 +76,14 @@
 #include "fastrpc_process_attributes.h"
 #include "fastrpc_trace.h"
 
-#ifndef ENABLE_UPSTREAM_DRIVER_INTERFACE
-#define DSP_MOUNT_LOCATION "/dsp/"
-#define DSP_DOM_LOCATION "/dsp/xdsp"
-#else
-#define DSP_MOUNT_LOCATION "/usr/lib/dsp/"
-#define DSP_DOM_LOCATION "/usr/lib/dsp/xdspn"
-#endif
+#define DEFAULT_DSP_LIBS_PATH ";/usr/lib/dsp/;"
+#define DEFAULT_DSP_SEARCH_PATH ";/usr/lib/rfsa/adsp;/vendor/lib/rfsa/adsp;/vendor/dsp/;/usr/lib/dsp/;"
 #define VENDOR_DSP_LOCATION "/vendor/dsp/"
 #define VENDOR_DOM_LOCATION "/vendor/dsp/xdsp/"
+#define DSP_LIB_KEY "DSP_LIBRARY_PATH"
+
+char DSP_LIBS_LOCATION[PATH_MAX] = DEFAULT_DSP_LIBS_PATH;
+char DSP_SEARCH_PATH[PATH_MAX] = DEFAULT_DSP_SEARCH_PATH;
 
 #ifdef LE_ENABLE
 #define PROPERTY_VALUE_MAX                                                     \
@@ -3438,7 +3437,6 @@ static int open_shell(int domain_id, apps_std_FILE *fh, int unsigned_shell) {
   char *shell_absName = NULL;
   char *domain_str = NULL;
   uint16_t shell_absNameLen = 0, absNameLen = 0;
-  ;
   int nErr = AEE_SUCCESS;
   int domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(domain_id);
   const char *shell_name = SIGNED_SHELL;
@@ -3459,22 +3457,21 @@ static int open_shell(int domain_id, apps_std_FILE *fh, int unsigned_shell) {
               (shell_absName = (char *)malloc(sizeof(char) * shell_absNameLen)),
           AEE_ENOMEMORY);
   strlcpy(shell_absName, shell_name, shell_absNameLen);
-
   strlcat(shell_absName, domain_str, shell_absNameLen);
-
-  absNameLen = strlen(DSP_MOUNT_LOCATION) + shell_absNameLen + 1;
+  absNameLen = strlen(DSP_LIBS_LOCATION) + shell_absNameLen + 1;
   VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
           AEE_ENOMEMORY);
-  strlcpy(absName, DSP_MOUNT_LOCATION, absNameLen);
-  strlcat(absName, shell_absName, absNameLen);
 
+  strlcpy(absName, DSP_LIBS_LOCATION, absNameLen);
+  strlcat(absName, shell_absName, absNameLen);
   nErr = apps_std_fopen(absName, "r", fh);
   if (nErr) {
-    absNameLen = strlen(DSP_DOM_LOCATION) + shell_absNameLen + 1;
+    absNameLen = strlen(DSP_LIBS_LOCATION) + strlen(SUBSYSTEM_NAME[domain]) + 1
+            + shell_absNameLen + 1;
     VERIFYC(NULL !=
                 (absName = (char *)realloc(absName, sizeof(char) * absNameLen)),
             AEE_ENOMEMORY);
-    strlcpy(absName, DSP_MOUNT_LOCATION, absNameLen);
+    strlcpy(absName, DSP_LIBS_LOCATION, absNameLen);
     strlcat(absName, SUBSYSTEM_NAME[domain], absNameLen);
     strlcat(absName, "/", absNameLen);
     strlcat(absName, shell_absName, absNameLen);
@@ -3503,7 +3500,7 @@ static int open_shell(int domain_id, apps_std_FILE *fh, int unsigned_shell) {
     }
   }
   if (!nErr)
-    FARF(RUNTIME_RPC_HIGH, "Successfully opened %s, domain %d", absName, domain);
+    FARF(RUNTIME_RPC_HIGH, "Successfully opened %s, domain %d", shell_absName, domain);
 bail:
   if (domain_str) {
     free(domain_str);
@@ -3525,7 +3522,7 @@ bail:
       FARF(ERROR,
            "Error 0x%x: %s failed for domain %d search paths used are %s, %s, "
            "%s (errno %s)\n",
-           nErr, __func__, domain, DSP_MOUNT_LOCATION, VENDOR_DSP_LOCATION,
+           nErr, __func__, domain, DSP_LIBS_LOCATION, VENDOR_DSP_LOCATION,
            VENDOR_DOM_LOCATION, strerror(errno));
     }
   }
@@ -4157,6 +4154,100 @@ static void exit_thread(void *value) {
   pthread_setspecific(tlsKey, (void *)NULL);
 }
 
+static int compare_strings(const void *a, const void *b) {
+  return strcmp(*(const char **)a, *(const char **)b);
+}
+
+const char* get_dsp_search_path() {
+  return DSP_SEARCH_PATH;
+}
+
+static void update_dsp_search_path(const char *buffer) {
+  strlcpy(DSP_SEARCH_PATH, buffer, sizeof(DSP_SEARCH_PATH));
+  strlcat(DSP_SEARCH_PATH, DEFAULT_DSP_SEARCH_PATH, sizeof(DSP_SEARCH_PATH));
+}
+
+static void get_dsp_lib_path(const char *machine_name, const char *filepath, char *dsp_lib_paths) {
+  char line[PATH_MAX], key[PATH_MAX], value[PATH_MAX],
+    section[PATH_MAX];
+  int section_found = 0;
+
+  FILE *file = fopen(filepath, "r");
+  if (!file)
+    return;
+
+  while (fgets(line, sizeof(line), file)) {
+    if (sscanf(line, "[%[^]]]", section) == 1) {
+      if (section_found)
+        break;
+      section_found = strcmp(section, machine_name) == 0;
+    } else if (section_found && sscanf(line, " %[^=]= \"%[^\"]\"", key, value) == 2) {
+      if (strcmp(key, DSP_LIB_KEY) == 0)
+        break;
+    }
+  }
+  fclose(file);
+
+  if (!section_found) {
+    FARF(ALWAYS, "Warning: Section [%s] not found in configuration file.\n", machine_name);
+    return;
+  }
+  if (value[0] == '\0') {
+    FARF(ALWAYS, "Warning: DSP_library_path directive missing/empty or doesn't "
+          "match expected syntax in section [%s].\n", machine_name);
+    return;
+  }
+
+  strlcpy(dsp_lib_paths, value, sizeof(value));
+}
+
+static void parse_config_dir(char *machine_name) {
+  DIR *dir = opendir(CONFIG_DIR);
+  struct dirent *entry;
+  char *file_list[1024];
+  int file_count = 0;
+  char dsp_lib_paths[PATH_MAX];
+
+  if (!dir)
+    return;
+
+  while ((entry = readdir(dir)) != NULL) {
+      if (entry->d_type == DT_REG && strstr(entry->d_name, ".conf")) {
+          file_list[file_count] = strdup(entry->d_name);
+          file_count++;
+      }
+  }
+  closedir(dir);
+
+  qsort(file_list, file_count, sizeof(char *), compare_strings);
+
+  for (int i = 0; i < file_count; i++) {
+    char filepath[PATH_MAX];
+    snprintf(filepath, sizeof(filepath), "%s%s", CONFIG_DIR, file_list[i]);
+    get_dsp_lib_path(machine_name, filepath, dsp_lib_paths);
+    free(file_list[i]);
+  }
+
+  strlcpy(DSP_LIBS_LOCATION, RELATIVE_LIB_PATH, sizeof(DSP_LIBS_LOCATION));
+  strlcat(DSP_LIBS_LOCATION, dsp_lib_paths, sizeof(DSP_LIBS_LOCATION));
+  update_dsp_search_path(DSP_LIBS_LOCATION);
+}
+
+static void configure_dsp_paths() {
+  char machine_name[PATH_MAX] = {0};
+  FILE *file = fopen(MACHINE_NAME_PATH, "r");
+
+  if (file == NULL)
+    return;
+
+  if (fgets(machine_name, sizeof(machine_name), file) != NULL)
+    // Remove trailing newline if present
+    machine_name[strcspn(machine_name, "\n")] = '\0';
+
+  fclose(file);
+  parse_config_dir(machine_name);
+}
+
 /*
  * Called only once by fastrpc_init_once
  * Initializes the data structures
@@ -4171,6 +4262,7 @@ static int fastrpc_apps_user_init(void) {
 
   VERIFY(AEE_SUCCESS == (nErr = PL_INIT(gpls)));
   VERIFY(AEE_SUCCESS == (nErr = PL_INIT(rpcmem)));
+  configure_dsp_paths();
   fastrpc_mem_init();
   fastrpc_context_table_init();
   fastrpc_log_init();
