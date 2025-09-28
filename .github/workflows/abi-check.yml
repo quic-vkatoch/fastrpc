@@ -1,0 +1,105 @@
+name: ABI Check (Libabigail)
+
+on:
+  pull_request:
+    branches: [development, main]
+
+jobs:
+  abi:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout PR (new)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install ABI tools & auto tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y abigail-tools automake
+          abidiff --version
+
+      - name: Download Linaro tools and untar
+        run: |
+          wget -c https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-i686_aarch64-linux-gnu.tar.xz
+          tar xf gcc-linaro-7.5.0-2019.12-i686_aarch64-linux-gnu.tar.xz
+
+      - name: Build PR (AArch64, with debug info)
+        run: |
+          # Set Up Build Environment
+          TOOLCHAIN_PATH="$PWD/gcc-linaro-7.5.0-2019.12-i686_aarch64-linux-gnu/bin"
+          export PATH="$TOOLCHAIN_PATH:$PATH"
+          export CC=aarch64-linux-gnu-gcc
+          export CXX=aarch64-linux-gnu-g++
+          export AS=aarch64-linux-gnu-as
+          export LD=aarch64-linux-gnu-ld
+          export RANLIB=aarch64-linux-gnu-ranlib
+          export STRIP=aarch64-linux-gnu-strip
+          export CFLAGS="-g -O2"
+          export CXXFLAGS="-g -O2"
+          
+          # Compile the source code
+          ./gitcompile --host=aarch64-linux-gnu
+          echo "PR build libs:"
+          ls -l src/.libs || true
+
+      - name: Prepare worktree for baseline (development)
+        run: |
+          git fetch origin development:refs/remotes/origin/development
+          git worktree add ../baseline origin/development
+
+      - name: Build baseline (AArch64, with debug info)
+        working-directory: ../baseline
+        run: |
+          # Set Up Build Environment (reference toolchain from main workspace)
+          TOOLCHAIN_PATH="$GITHUB_WORKSPACE/gcc-linaro-7.5.0-2019.12-i686_aarch64-linux-gnu/bin"
+          export PATH="$TOOLCHAIN_PATH:$PATH"
+          export CC=aarch64-linux-gnu-gcc
+          export CXX=aarch64-linux-gnu-g++
+          export AS=aarch64-linux-gnu-as
+          export LD=aarch64-linux-gnu-ld
+          export RANLIB=aarch64-linux-gnu-ranlib
+          export STRIP=aarch64-linux-gnu-strip
+          export CFLAGS="-g -O2"
+          export CXXFLAGS="-g -O2"
+          
+          # Compile the source code
+          ./gitcompile --host=aarch64-linux-gnu
+          echo "Baseline libs:"
+          ls -l src/.libs || true
+
+      - name: Run Libabigail (abidiff) on shared libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+          LIBS=(
+            libadsprpc.so
+            libcdsprpc.so
+            libsdsprpc.so
+            libadsp_default_listener.so
+            libcdsp_default_listener.so
+            libsdsp_default_listener.so
+          )
+
+          for L in "${LIBS[@]}"; do
+            if [[ -f "src/.libs/$L" && -f "../baseline/src/.libs/$L" ]]; then
+              echo "::group::ABI diff for $L"
+              set +e
+              abidiff "../baseline/src/.libs/$L" "src/.libs/$L"
+              EC=$?
+              set -e
+              echo "::endgroup::"
+              if [[ $EC -ne 0 ]]; then
+                echo "ABI changes detected in $L (abidiff exit code=$EC)."
+                FAIL=1
+              fi
+            else
+              echo "Skip $L (not present in one of the builds)."
+            fi
+          done
+
+          if [[ $FAIL -ne 0 ]]; then
+            echo "ABI check failed: at least one library changed ABI."
+            exit 1
+          fi
