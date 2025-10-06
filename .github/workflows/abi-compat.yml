@@ -1,0 +1,87 @@
+name: ABI/API Compatibility Check
+
+on:
+  pull_request:
+    branches: [development, main]
+
+env:
+  CC: aarch64-linux-gnu-gcc
+  CXX: aarch64-linux-gnu-g++
+  AS: aarch64-linux-gnu-as
+  LD: aarch64-linux-gnu-ld
+  RANLIB: aarch64-linux-gnu-ranlib
+  STRIP: aarch64-linux-gnu-strip
+  CFLAGS: "-g -Og -fno-eliminate-unused-debug-types"
+  CXXFLAGS: "-g -Og -fno-eliminate-unused-debug-types"
+
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR (new)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install ABI tools & build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y abi-compliance-checker abi-dumper automake g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          abi-compliance-checker -version
+          abi-dumper -version
+
+      - name: Build PR (AArch64, with debug info)
+        run: |
+          ./gitcompile --host=aarch64-linux-gnu
+          ls -l src/.libs || true
+
+      - name: Prepare baseline worktree (development)
+        run: |
+          git fetch origin development:refs/remotes/origin/development
+          git worktree add ../baseline origin/development
+
+      - name: Build baseline (AArch64, with debug info)
+        working-directory: ../baseline
+        run: |
+          ./gitcompile --host=aarch64-linux-gnu
+          ls -l src/.libs || true
+      - name: Run ABI compatibility check
+        shell: bash
+        run: |
+          mkdir -p abi/{dumps,reports,headers-{baseline,pr}}
+          
+          # Copy headers for ABI comparison
+          cp ../baseline/inc/{remote,rpcmem}.h abi/headers-baseline/
+          cp inc/{remote,rpcmem}.h abi/headers-pr/
+          
+          LIBS=(libadsprpc.so libcdsprpc.so libsdsprpc.so)
+          FAIL=0
+          
+          for lib in "${LIBS[@]}"; do
+            base_lib="../baseline/src/.libs/$lib"
+            pr_lib="src/.libs/$lib"
+            name="${lib%%.so*}"
+            
+            if [[ -f "$base_lib" && -f "$pr_lib" ]]; then
+              echo "::group::Processing $lib"
+              
+              # Create ABI dumps
+              abi-dumper "$base_lib" -o "abi/dumps/${name}.base.dump" -lver base -public-headers "abi/headers-baseline" || FAIL=1
+              abi-dumper "$pr_lib" -o "abi/dumps/${name}.pr.dump" -lver pr -public-headers "abi/headers-pr" || FAIL=1
+              
+              # Compare ABI
+              abi-compliance-checker -l "$name" -old "abi/dumps/${name}.base.dump" -new "abi/dumps/${name}.pr.dump" -report-path "abi/reports/${name}.html" || FAIL=1
+              
+              echo "::endgroup::"
+            else
+              echo "Skipping $lib (missing files)"
+            fi
+          done
+          
+          [[ $FAIL -eq 0 ]] || { echo "ABI check failed"; exit 1; }
+      - name: Upload ABI reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi-compat-reports
+          path: abi/reports
