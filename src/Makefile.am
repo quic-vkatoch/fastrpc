@@ -1,6 +1,6 @@
 lib_LTLIBRARIES =
 
-LIBDSPRPC_CFLAGS = -fno-short-enums -U_DEBUG -DARM_ARCH_7A -DLE_ENABLE -DENABLE_UPSTREAM_DRIVER_INTERFACE -DUSE_SYSLOG -I$(top_srcdir)/inc
+LIBDSPRPC_CFLAGS = -fno-short-enums -U_DEBUG -DARM_ARCH_7A -DLE_ENABLE -DENABLE_UPSTREAM_DRIVER_INTERFACE -DUSE_SYSLOG -DCONFIG_DIR='"/usr/share/qcom/conf.d/"' -DRELATIVE_LIB_PATH='"/usr/share/qcom/"' -DMACHINE_NAME_PATH='"/sys/firmware/devicetree/base/model"' -I$(top_srcdir)/inc
 
 LIBDSPRPC_SOURCES = \
 		fastrpc_apps_user.c \
