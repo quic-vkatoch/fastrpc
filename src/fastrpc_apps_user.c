@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <yaml.h>
 
 #define FARF_ERROR 1
 #define FARF_HIGH 1
@@ -4166,37 +4167,81 @@ static void update_dsp_search_path(const char *buffer) {
 }
 
 static void get_dsp_lib_path(const char *machine_name, const char *filepath, char *dsp_lib_paths) {
-  char line[PATH_MAX], key[PATH_MAX], value[PATH_MAX],
-    section[PATH_MAX];
-  int section_found = 0;
-
   FILE *file = fopen(filepath, "r");
   if (!file)
     return;
 
-  while (fgets(line, sizeof(line), file)) {
-    if (sscanf(line, "[%[^]]]", section) == 1) {
-      if (section_found)
+  yaml_parser_t parser;
+  yaml_event_t event;
+  int done = 0;
+  int in_machines = 0;
+  int in_target_machine = 0;
+  int found_dsp_path = 0;
+  char current_machine[PATH_MAX] = {0};
+
+  if (!yaml_parser_initialize(&parser)) {
+    FARF(ALWAYS, "Warning: Failed to initialize YAML parser for file %s\n", filepath);
+    fclose(file);
+    return;
+  }
+
+  yaml_parser_set_input_file(&parser, file);
+
+  while (!done) {
+    if (!yaml_parser_parse(&parser, &event)) {
+      FARF(ALWAYS, "Warning: YAML parser error in file %s\n", filepath);
+      break;
+    }
+
+    switch (event.type) {
+      case YAML_SCALAR_EVENT: {
+        const char *value = (const char *)event.data.scalar.value;
+        
+        if (!in_machines && strcmp(value, "machines") == 0) {
+          in_machines = 1;
+        } else if (in_machines && !in_target_machine) {
+          // This is a machine name key
+          strlcpy(current_machine, value, sizeof(current_machine));
+          if (strcmp(current_machine, machine_name) == 0) {
+            in_target_machine = 1;
+          }
+        } else if (in_target_machine && strcmp(value, DSP_LIB_KEY) == 0) {
+          // Next scalar will be the DSP_LIBRARY_PATH value
+          yaml_event_delete(&event);
+          if (yaml_parser_parse(&parser, &event) && event.type == YAML_SCALAR_EVENT) {
+            strlcpy(dsp_lib_paths, (const char *)event.data.scalar.value, PATH_MAX);
+            found_dsp_path = 1;
+            done = 1;
+          }
+        }
         break;
-      section_found = strcmp(section, machine_name) == 0;
-    } else if (section_found && sscanf(line, " %[^=]= \"%[^\"]\"", key, value) == 2) {
-      if (strcmp(key, DSP_LIB_KEY) == 0)
+      }
+      case YAML_MAPPING_END_EVENT:
+        if (in_target_machine) {
+          // Exiting the target machine mapping
+          in_target_machine = 0;
+          if (found_dsp_path) {
+            done = 1;
+          }
+        }
+        break;
+      case YAML_STREAM_END_EVENT:
+        done = 1;
+        break;
+      default:
         break;
     }
+
+    yaml_event_delete(&event);
   }
+
+  yaml_parser_delete(&parser);
   fclose(file);
 
-  if (!section_found) {
-    FARF(ALWAYS, "Warning: Section [%s] not found in configuration file.\n", machine_name);
-    return;
+  if (!found_dsp_path) {
+    FARF(ALWAYS, "Warning: DSP_LIBRARY_PATH not found for machine [%s] in configuration file %s\n", 
+         machine_name, filepath);
   }
-  if (value[0] == '\0') {
-    FARF(ALWAYS, "Warning: DSP_library_path directive missing/empty or doesn't "
-          "match expected syntax in section [%s].\n", machine_name);
-    return;
-  }
-
-  strlcpy(dsp_lib_paths, value, sizeof(value));
 }
 
 static void parse_config_dir(char *machine_name) {
@@ -4204,13 +4249,14 @@ static void parse_config_dir(char *machine_name) {
   struct dirent *entry;
   char *file_list[1024];
   int file_count = 0;
-  char dsp_lib_paths[PATH_MAX];
+  char dsp_lib_paths[PATH_MAX] = {0};
 
   if (!dir)
     return;
 
   while ((entry = readdir(dir)) != NULL) {
-      if (entry->d_type == DT_REG && strstr(entry->d_name, ".conf")) {
+      if (entry->d_type == DT_REG && 
+          (strstr(entry->d_name, ".yaml") || strstr(entry->d_name, ".yml"))) {
           file_list[file_count] = strdup(entry->d_name);
           file_count++;
       }
@@ -4224,11 +4270,21 @@ static void parse_config_dir(char *machine_name) {
     snprintf(filepath, sizeof(filepath), "%s%s", CONFIG_DIR, file_list[i]);
     get_dsp_lib_path(machine_name, filepath, dsp_lib_paths);
     free(file_list[i]);
+    
+    // If we found a valid path, break early
+    if (dsp_lib_paths[0] != '\0') {
+      break;
+    }
   }
 
-  strlcpy(DSP_LIBS_LOCATION, RELATIVE_LIB_PATH, sizeof(DSP_LIBS_LOCATION));
-  strlcat(DSP_LIBS_LOCATION, dsp_lib_paths, sizeof(DSP_LIBS_LOCATION));
-  update_dsp_search_path(DSP_LIBS_LOCATION);
+  if (dsp_lib_paths[0] != '\0') {
+    strlcpy(DSP_LIBS_LOCATION, RELATIVE_LIB_PATH, sizeof(DSP_LIBS_LOCATION));
+    strlcat(DSP_LIBS_LOCATION, dsp_lib_paths, sizeof(DSP_LIBS_LOCATION));
+    update_dsp_search_path(DSP_LIBS_LOCATION);
+  } else {
+    FARF(ALWAYS, "Warning: No DSP library path found for machine [%s] in any configuration file\n", 
+         machine_name);
+  }
 }
 
 static void configure_dsp_paths() {

@@ -954,8 +954,8 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
                     strlen(ADSP_LIBRARY_PATH)) == 0 ||
         strncmp(envvarname, DSP_LIBRARY_PATH,
                     strlen(DSP_LIBRARY_PATH)) == 0) {
-      // Calculate total length of env and DSP_SEARCH_PATH
-      envListPrependLen = envListLen + strlen(dsp_search_path);
+      // Calculate total length of env + semicolon + DSP_SEARCH_PATH
+      envListPrependLen = envListLen + 1 + strlen(dsp_search_path);
       if (envLenGuess < envListPrependLen) {
         FREEIF(envListBuf);
         VERIFYC(envListBuf =
@@ -965,6 +965,8 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
         VERIFY(0 == (nErr = apps_std_getenv(envvarname, envList,
                                             envListPrependLen, &listLen)));
       }
+      // Append semicolon before DSP_SEARCH_PATH
+      strlcat(envList, ";", envListPrependLen);
       // Append default DSP_SEARCH_PATH to user defined env
       strlcat(envList, dsp_search_path, envListPrependLen);
       envListLen = envListPrependLen;
