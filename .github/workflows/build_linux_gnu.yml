@@ -32,4 +32,4 @@ jobs:
     - name: Compile code for LE platform
       run: |
         GITCOMPILE_NO_MAKE=true ./gitcompile
-        make distcheck DISTCHECK_CONFIGURE_FLAGS="--with-systemdsystemunitdir='\$${prefix}/lib/systemd/system'"
+        make distcheck DISTCHECK_CONFIGURE_FLAGS="--with-systemdsystemunitdir='lib/systemd/system'"
