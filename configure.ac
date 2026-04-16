@@ -48,12 +48,30 @@ AC_ARG_WITH([systemdsystemunitdir],
 AC_MSG_NOTICE([systemd unit directory: $systemdsystemunitdir])
 AC_SUBST([systemdsystemunitdir])
 
+# Enable pkg-config
+PKG_PROG_PKG_CONFIG
+
+# Configure udev rules directory option (--with-udevrulesdir)
+AC_ARG_WITH([udevrulesdir],
+  [AS_HELP_STRING([--with-udevrulesdir=DIR],
+                  [Directory for udev rules files (default: /lib/udev/rules.d)])],
+  [udevrulesdir="$withval"],
+  [PKG_CHECK_VAR([udevdir], [udev], [udevdir], [udevrulesdir="${udevdir}/rules.d"], [udevrulesdir="/lib/udev/rules.d"])])
+AC_MSG_NOTICE([udev rules directory: $udevrulesdir])
+AC_SUBST([udevrulesdir])
+
+# Configure sysusers directory option (--with-sysusersdir)
+AC_ARG_WITH([sysusersdir],
+  [AS_HELP_STRING([--with-sysusersdir=DIR],
+                  [Directory for systemd sysusers files (default: /usr/lib/sysusers.d)])],
+  [sysusersdir="$withval"],
+  [PKG_CHECK_VAR([sysusersdir], [systemd], [sysusersdir], [], [sysusersdir="/usr/lib/sysusers.d"])])
+AC_MSG_NOTICE([sysusers directory: $sysusersdir])
+AC_SUBST([sysusersdir])
+
 # Checks for typedefs, structures, and compiler characteristics.
 
 # Checks for library functions.
-
-# Enable pkg-config
-PKG_PROG_PKG_CONFIG
 
 # Check for libyaml only if not Android
 AS_IF([test "$compile_for_android" = no], [

@@ -12,3 +12,11 @@ dist_systemdsystemunit_DATA = \
 	gdsp0rpcd.service \
 	gdsp1rpcd.service \
 	sdsprpcd.service
+
+# sysusers.d file for creating fastrpc group
+sysusersdir = @sysusersdir@
+dist_sysusers_DATA = fastrpc.conf
+
+# udev rules
+udevrulesdir = @udevrulesdir@
+dist_udevrules_DATA = 60-fastrpc.rules
