@@ -928,7 +928,6 @@ bail:
 int remote_munmap64(uint64_t vaddrout, int64_t size) {
   int dev, domain = DEFAULT_DOMAIN_ID, nErr = AEE_SUCCESS, ref = 0;
   uint32_t rflags;
-  QNode *pn, *pnn;
   struct fastrpc_remote_map *mNode = NULL;
 
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_init_once()));
