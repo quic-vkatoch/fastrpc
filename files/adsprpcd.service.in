@@ -6,6 +6,6 @@ ConditionPathExists=|/dev/fastrpc-adsp-secure
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/adsprpcd
+ExecStart=@sbindir@/adsprpcd
 Restart=on-failure
 RestartSec=5

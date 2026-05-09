@@ -6,6 +6,6 @@ ConditionPathExists=|/dev/fastrpc-gdsp0-secure
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/gdsprpcd rootpd gdsp0
+ExecStart=@sbindir@/gdsprpcd rootpd gdsp0
 Restart=on-failure
 RestartSec=5
