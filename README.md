@@ -135,6 +135,35 @@ Hexagon SDK documentation covers all the required details about FastRPC. Please 
 
 ## Build & Installation
 
+### Setting up the fastrpc group
+
+The udev rules set `/dev/fastrpc-*dsp` device nodes to `root:fastrpc` with `0640` permissions and
+grant the `fastrpc` group read/write access to `/dev/dma_heap/system` (required for memory allocation).
+Applications that use `libfastrpc` must therefore belong to the `fastrpc` group.
+
+The build system installs a `sysusers.d` configuration file that automatically creates the `fastrpc` group when `systemd-sysusers` runs (typically at boot or via package manager triggers).
+
+To manually create the group:
+
+```bash
+groupadd --system fastrpc
+```
+
+Or trigger systemd-sysusers:
+
+```bash
+sudo systemd-sysusers
+```
+
+To grant an application user access to FastRPC devices:
+
+```bash
+usermod -aG fastrpc <username>
+```
+
+The services are automatically started by udev when FastRPC devices are detected.
+No manual `systemctl enable` is required.
+
 ### Steps to Generate Native Binaries on Device
 
 ```bash
@@ -142,6 +171,8 @@ git clone https://github.com/quic/fastrpc
 cd fastrpc
 ./gitcompile
 sudo make install
+sudo ldconfig              # Update dynamic linker cache
+sudo systemd-sysusers      # Create fastrpc group
 ```
 
 ### Steps to cross-compile the project on Ubuntu

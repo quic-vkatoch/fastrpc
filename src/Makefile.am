@@ -113,7 +113,7 @@ libsdsp_default_listener_la_DEPENDENCIES = libsdsprpc.la
 libsdsp_default_listener_la_LDFLAGS = libsdsprpc.la -shared -module $(USE_LOG) -version-number @LT_VERSION_NUMBER@ $(LIBDSPRPC_LDFLAGS)
 libsdsp_default_listener_la_CFLAGS = $(SDSP_CFLAGS) -DUSE_SYSLOG
 
-bin_PROGRAMS = adsprpcd cdsprpcd sdsprpcd gdsprpcd
+sbin_PROGRAMS = adsprpcd cdsprpcd sdsprpcd gdsprpcd
 
 adsprpcddir = $(libdir)
 adsprpcd_SOURCES = dsprpcd.c
