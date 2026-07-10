@@ -3245,7 +3245,20 @@ static int open_shell(int domain_id, apps_std_FILE *fh, int unsigned_shell) {
   strlcat(shell_absName, domain_str, shell_absNameLen);
 
   strlcpy(dir_list, DSP_LIBS_LOCATION, sizeof(dir_list));
-  nErr = fopen_from_dirlist(dir_list, ";", "r", shell_absName, fh);
+  {
+    struct fastrpc_path_list pl_stack;
+    char *tok = NULL, *saveptr = NULL;
+    int k = 0;
+    memset(&pl_stack, 0, sizeof(pl_stack));
+    pl_stack.buf = dir_list;
+    tok = strtok_r(pl_stack.buf, ";", &saveptr);
+    while (tok != NULL && k < FASTRPC_MAX_SEARCH_PATHS) {
+      pl_stack.paths[k++] = tok;
+      tok = strtok_r(NULL, ";", &saveptr);
+    }
+    pl_stack.count = k;
+    nErr = fopen_from_dirlist(&pl_stack, "r", shell_absName, fh);
+  }
 
   if (nErr) {
     absNameLen = strlen(VENDOR_DSP_LOCATION) + shell_absNameLen + 1;
