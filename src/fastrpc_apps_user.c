@@ -380,10 +380,10 @@ static void build_dsp_search_path_cache_for_domain(int domain) {
    * The user-set ADSP_LIBRARY_PATH env is prepended at open-time by
    * apps_std_imp, so the effective resolution order is:
    *   1. ADSP_LIBRARY_PATH (user/container, highest priority)
-   *   2. arch-specific path  (e.g. CONFIG_BASE_DIR/hexagon/v75)
+   *   2. arch-specific path  (e.g. CONFIG_BASE_DIR/hexagon-v75)
    *   3. DSP_LIBS_LOCATION   (board-specific path from YAML + generic fallback)
    */
-  if (snprintf(arch_path, sizeof(arch_path), "%s/%s",
+  if (snprintf(arch_path, sizeof(arch_path), "%s-%s",
                HEXAGON_LIBS_PATH_PREFIX, arch_str) >= (int)sizeof(arch_path)) {
     FARF(ALWAYS,
          "Warning: %s: ARCH path truncated for domain %d, "
